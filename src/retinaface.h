@@ -29,10 +29,12 @@ class RetinaFace {
     std::vector<struct Bbox> findFace(cv::Mat &img);
 
   private:
-    int m_frameWidth, m_frameHeight, m_INPUT_C, m_INPUT_H, m_INPUT_W, m_OUTPUT_SIZE_BASE, m_maxFacesPerScene;
+    int m_frameWidth, m_frameHeight;        //视频分辨率尺寸
+    int m_INPUT_C, m_INPUT_H, m_INPUT_W;    //网络输入输入尺寸
+    int m_OUTPUT_SIZE_BASE, m_maxFacesPerScene;
     float m_nms_threshold, m_bbox_threshold;
     static const int m_batchSize = 1;
-    float m_scale_h;
+    float m_scale_h;    //高度缩放比例(视频帧尺寸相对于网络输入尺寸)
     float m_scale_w;
     cv::Mat m_input;
     float *m_output0, *m_output1;

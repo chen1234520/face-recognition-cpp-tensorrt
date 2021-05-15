@@ -36,17 +36,22 @@ class ArcFaceIR50 {
     void initKnownEmbeds(int num);
     void initCosSim();
 
-    std::vector<struct CroppedFace> croppedFaces;
-    std::vector<struct KnownID> knownFaces;
-    static int classCount;
+    std::vector<struct CroppedFace> croppedFaces;   //检测到的所有人脸
+    std::vector<struct KnownID> knownFaces;    //存储人脸库中的所有人脸ID
+    static int classCount;  //人脸库中类别数
 
   private:
     const char *m_INPUT_BLOB_NAME = "input";
     const char *m_OUTPUT_BLOB_NAME = "output";
-    int m_frameWidth, m_frameHeight, m_INPUT_C, m_INPUT_H, m_INPUT_W, m_OUTPUT_D, m_OUTPUT_SIZE_BASE, m_INPUT_SIZE,
-        m_OUTPUT_SIZE, m_maxFacesPerScene;
+    int m_frameWidth, m_frameHeight;
+    int m_INPUT_C, m_INPUT_H, m_INPUT_W;    //网络输入尺寸
+    int m_OUTPUT_D, m_OUTPUT_SIZE_BASE;     //m_OUTPUT_D:网络输出维度
+    int m_INPUT_SIZE, m_OUTPUT_SIZE;
+    int m_maxFacesPerScene;
     cv::Mat m_input;
-    float *m_embed, *m_embeds, *m_knownEmbeds, *m_outputs;
+    float *m_embed, *m_embeds;  //m_embedd:单张人脸的网络输出结果,m_embeds:所有人脸的网络输出结果
+    float *m_knownEmbeds;    //存储人脸库中人脸底库的特征
+    float *m_outputs;        //m_outputs:存储人脸匹配结果.(人脸库中每个类别的相似度得分.score1,score1,......score10)
     std::vector<std::vector<float>> m_embeddings;
 
     Logger m_gLogger;

@@ -6,7 +6,8 @@
 #include "cuda_runtime_api.h"
 #include <chrono>
 #include <cublasLt.h>
-#include <curl/curl.h>
+#include <curl.h>
+// #include <curl/curl.h>
 #include <dirent.h>
 #include <fstream>
 #include <iostream>
@@ -30,13 +31,13 @@ struct Bbox {
 
 struct CroppedFace {
     cv::Mat face;
-    cv::Mat faceMat;
+    cv::Mat faceMat;    //人脸ROI图像
     int x1, y1, x2, y2;
 };
 
 struct KnownID {
-    std::string className;
-    std::vector<float> embeddedFace;
+    std::string className;  //人脸ID
+    std::vector<float> embeddedFace;  //人脸特征
 };
 
 struct Paths {
@@ -77,7 +78,7 @@ class CosineSimilarityCalculator {
     cudaStream_t stream;
     float *dA, *dB, *dC;
     const float alpha = 1, beta = 0;
-    int m, n, k, lda, ldb, ldc;
+    int m, n, k, lda, ldb, ldc; //m:人脸库中人脸数量;n:检测到的人脸数量; k:人脸特征维度; lda, ldb：人脸特征维度;ldc:人脸库中人脸数量
     cublasLtMatmulDesc_t operationDesc = NULL;
     cublasLtMatrixLayout_t Adesc = NULL;
     cublasLtMatmulPreference_t preference = NULL;

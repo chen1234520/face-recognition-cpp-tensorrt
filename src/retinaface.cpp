@@ -2,16 +2,17 @@
 
 RetinaFace::RetinaFace(Logger gLogger, const std::string engineFile, int frameWidth, int frameHeight,
                        std::vector<int> inputShape, int maxFacesPerScene, float nms_threshold, float bbox_threshold) {
-    m_frameWidth = static_cast<const int>(frameWidth);
+    m_frameWidth = static_cast<const int>(frameWidth);  //视频分辨率尺寸
     m_frameHeight = static_cast<const int>(frameHeight);
     assert(inputShape.size() == 3);
-    m_INPUT_C = static_cast<const int>(inputShape[0]);
+    m_INPUT_C = static_cast<const int>(inputShape[0]);  //网络输入尺寸
     m_INPUT_H = static_cast<const int>(inputShape[1]);
     m_INPUT_W = static_cast<const int>(inputShape[2]);
+    // stride 32 16 8 三个尺寸的检测分支
     m_OUTPUT_SIZE_BASE = static_cast<const int>(
         (m_INPUT_H / 8 * m_INPUT_W / 8 + m_INPUT_H / 16 * m_INPUT_W / 16 + m_INPUT_H / 32 * m_INPUT_W / 32) * 2);
-    m_output0 = new float[m_OUTPUT_SIZE_BASE * 4];
-    m_output1 = new float[m_OUTPUT_SIZE_BASE * 2];
+    m_output0 = new float[m_OUTPUT_SIZE_BASE * 4];  //bbox 可能是
+    m_output1 = new float[m_OUTPUT_SIZE_BASE * 2];  //人脸类别 可能是
     m_maxFacesPerScene = static_cast<const int>(maxFacesPerScene);
     m_nms_threshold = static_cast<const float>(nms_threshold);
     m_bbox_threshold = static_cast<const float>(bbox_threshold);
@@ -19,10 +20,10 @@ RetinaFace::RetinaFace(Logger gLogger, const std::string engineFile, int frameWi
     m_scale_h = (float)m_INPUT_H / m_frameHeight;
     m_scale_w = (float)m_INPUT_W / m_frameWidth;
 
-    // load engine from .engine file
+    // step1.load engine from .engine file
     loadEngine(gLogger, engineFile);
 
-    // create stream and pre-allocate GPU buffers memory
+    // step2.create stream and pre-allocate GPU buffers memory.创建流并预分配GPU缓冲区内存
     preInference();
 }
 
@@ -41,10 +42,14 @@ void RetinaFace::loadEngine(Logger gLogger, const std::string engineFile) {
             file.read(trtModelStream_.data(), size);
             file.close();
         }
+
+        ///==step1.通过RunTime对象反序列化读取engine引擎
         IRuntime *runtime = createInferRuntime(gLogger);
         assert(runtime != nullptr);
         m_engine = runtime->deserializeCudaEngine(trtModelStream_.data(), size, nullptr);
         assert(m_engine != nullptr);
+
+        ///==step2.创建context来开辟空间存储中间值，一个engine可以有多个context来并行处理
         m_context = m_engine->createExecutionContext();
         assert(m_context != nullptr);
     } else {
@@ -54,25 +59,30 @@ void RetinaFace::loadEngine(Logger gLogger, const std::string engineFile) {
 
 void RetinaFace::preInference() {
     /*
-    Does not make landmark head as we do not use face alignment.
+    Does not make landmark head as we do not use face alignment. 不做关键点的检测头，因为我们不使用人脸对齐.
     */
     // Engine requires exactly IEngine::getNbBindings() number of buffers.
     assert(m_engine->getNbBindings() == 3);
 
     // In order to bind the buffers, we need to know the names of the input and
     // output tensors. Note that indices are guaranteed to be less than IEngine::getNbBindings()
+    // 为了绑定缓冲区，我们需要知道输入和输出张量的名称。请注意，索引保证小于IEEngine:：getNbBindings（）
+
+    ///==step1.指定输入和输出节点名来获取输入输出索引
     inputIndex = m_engine->getBindingIndex("input_det");
     outputIndex0 = m_engine->getBindingIndex("output_det0");
     outputIndex1 = m_engine->getBindingIndex("output_det1");
-    //outputIndex2 = m_engine->getBindingIndex("output_det2");
+    //outputIndex2 = m_engine->getBindingIndex("output_det2");  //这个应该就是关键点的输出
 
     // Create GPU buffers on device
+    ///==step2.在设备上创建GPU缓冲区
     checkCudaStatus(cudaMalloc(&buffers[inputIndex], m_batchSize * m_INPUT_C * m_INPUT_H * m_INPUT_W * sizeof(float)));
-    checkCudaStatus(cudaMalloc(&buffers[outputIndex0], m_batchSize * m_OUTPUT_SIZE_BASE * 4 * sizeof(float)));
-    checkCudaStatus(cudaMalloc(&buffers[outputIndex1], m_batchSize * m_OUTPUT_SIZE_BASE * 2 * sizeof(float)));
-    //checkCudaStatus(cudaMalloc(&buffers[outputIndex2], m_batchSize * m_OUTPUT_SIZE_BASE * 10 * sizeof(float)));
+    checkCudaStatus(cudaMalloc(&buffers[outputIndex0], m_batchSize * m_OUTPUT_SIZE_BASE * 4 * sizeof(float)));  //人脸2分类
+    checkCudaStatus(cudaMalloc(&buffers[outputIndex1], m_batchSize * m_OUTPUT_SIZE_BASE * 2 * sizeof(float)));  //bbox坐标4个值
+    //checkCudaStatus(cudaMalloc(&buffers[outputIndex2], m_batchSize * m_OUTPUT_SIZE_BASE * 10 * sizeof(float)));   //关键点1个值
 
     // Create stream
+    ///==step3.创建流
     checkCudaStatus(cudaStreamCreate(&stream));
 }
 
@@ -110,6 +120,7 @@ void RetinaFace::preprocess(cv::Mat &img) {
 
 void RetinaFace::doInference(float *input, float *output0, float *output1) {
     // DMA input batch data to device, infer on the batch asynchronously, and DMA output back to host
+    // DMA将批数据输入设备，异步推断批处理，DMA输出回主机
     checkCudaStatus(cudaMemcpyAsync(buffers[inputIndex], input,
                                     m_batchSize * m_INPUT_C * m_INPUT_H * m_INPUT_W * sizeof(float),
                                     cudaMemcpyHostToDevice, stream));
@@ -125,14 +136,17 @@ void RetinaFace::doInference(float *input, float *output0, float *output1) {
 
 std::vector<struct Bbox> RetinaFace::findFace(cv::Mat &img) {
     //auto start = std::chrono::high_resolution_clock::now();
+    ///==预处理
     preprocess(img);
     //auto end = std::chrono::high_resolution_clock::now();
     //std::cout << "\tPre: " << std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() / 1000. << "ms\n";
     //start = std::chrono::high_resolution_clock::now();
+    ///===前向
     doInference((float *)m_input.ptr<float>(0), m_output0, m_output1);
     //end = std::chrono::high_resolution_clock::now();
     //std::cout << "\tInfer: " << std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() / 1000. << "ms\n";
     //start = std::chrono::high_resolution_clock::now();
+    ///===后处理,计算bbox, NMS等
     postprocessing(m_output0, m_output1);
     //end = std::chrono::high_resolution_clock::now();
     //std::cout << "\tPost: " << std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() / 1000. << "ms\n";
@@ -142,7 +156,7 @@ std::vector<struct Bbox> RetinaFace::findFace(cv::Mat &img) {
 void RetinaFace::postprocessing(float *bbox, float *conf) {
     m_outputBbox.clear();
     std::vector<anchorBox> anchor;
-    create_anchor_retinaface(anchor, m_INPUT_W, m_INPUT_H);
+    create_anchor_retinaface(anchor, m_INPUT_W, m_INPUT_H);     //创建anchor
 
     for (int i = 0; i < anchor.size(); ++i) {
         if (*(conf + 1) > m_bbox_threshold) {
@@ -174,7 +188,7 @@ void RetinaFace::postprocessing(float *bbox, float *conf) {
                 result.x2 = result.x2 / m_scale_h;
             }
 
-            // Clip object box coordinates to network resolution
+            // Clip object box coordinates to network resolution.将对象框坐标剪裁为网络分辨率
             result.y1 = CLIP(result.y1, 0, m_frameWidth - 1);
             result.x1 = CLIP(result.x1, 0, m_frameHeight - 1);
             result.y2 = CLIP(result.y2, 0, m_frameWidth - 1);
@@ -190,7 +204,7 @@ void RetinaFace::postprocessing(float *bbox, float *conf) {
         conf += 2;
     }
     std::sort(m_outputBbox.begin(), m_outputBbox.end(), m_cmp);
-    nms(m_outputBbox, m_nms_threshold);
+    nms(m_outputBbox, m_nms_threshold);    //nms
     if (m_outputBbox.size() > m_maxFacesPerScene)
         m_outputBbox.resize(m_maxFacesPerScene);
 }
